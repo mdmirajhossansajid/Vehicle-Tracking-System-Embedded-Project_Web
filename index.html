@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Vehicle Tracking System</title>
+
+    <!-- Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- =========================================================
+         HEADER
+    ========================================================== -->
+
+    <header class="topbar">
+
+        <div class="brand">
+
+            <div class="brand-icon">
+                <span>◉</span>
+            </div>
+
+            <div>
+                <h1>TRACK<span>VISION</span></h1>
+                <p>VEHICLE MONITORING SYSTEM</p>
+            </div>
+
+        </div>
+
+
+        <div class="header-right">
+
+            <div class="connection">
+
+                <span id="connectionDot" class="status-dot offline">
+                </span>
+
+                <div>
+                    <strong id="deviceStatus">
+                        OFFLINE
+                    </strong>
+
+                    <small id="lastUpdate">
+                        Waiting for GPS...
+                    </small>
+                </div>
+
+            </div>
+
+
+            <div class="live-badge">
+
+                <span></span>
+
+                LIVE
+
+            </div>
+
+        </div>
+
+    </header>
+
+
+    <!-- =========================================================
+         MAIN CONTENT
+    ========================================================== -->
+
+    <main class="container">
+
+
+        <!-- =====================================================
+             HERO SECTION
+        ====================================================== -->
+
+        <section class="hero">
+
+            <div class="hero-content">
+
+                <div class="hero-label">
+
+                    <span class="pulse"></span>
+
+                    REAL-TIME GPS MONITORING
+
+                </div>
+
+
+                <h2>
+
+                    Vehicle Tracking
+
+                    <span>Dashboard</span>
+
+                </h2>
+
+
+                <p>
+
+                    Monitor your vehicle location, speed, route
+                    and GPS telemetry in real time.
+
+                </p>
+
+
+                <div class="hero-info">
+
+                    <div>
+
+                        <small>DEVICE</small>
+
+                        <strong>
+                            ESP32 GPS TRACKER
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <small>GPS MODULE</small>
+
+                        <strong>
+                            GP-02 GNSS
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <small>BACKEND</small>
+
+                        <strong>
+                            FIREBASE RTDB
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            <!-- RADAR -->
+
+            <div class="radar">
+
+                <div class="radar-circle circle-1"></div>
+
+                <div class="radar-circle circle-2"></div>
+
+                <div class="radar-circle circle-3"></div>
+
+                <div class="radar-line"></div>
+
+
+                <div class="radar-center">
+
+                    <span>GPS</span>
+
+                </div>
+
+
+                <div class="radar-point point-1"></div>
+
+                <div class="radar-point point-2"></div>
+
+                <div class="radar-point point-3"></div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- =====================================================
+             STATISTICS
+        ====================================================== -->
+
+        <section class="stats-grid">
+
+
+            <!-- LIVE SPEED -->
+
+            <div class="stat-card">
+
+                <div class="stat-top">
+
+                    <div>
+
+                        <span class="stat-label">
+                            LIVE SPEED
+                        </span>
+
+                        <h3>
+
+                            <span id="speedValue">
+                                0.0
+                            </span>
+
+                            <small>
+                                km/h
+                            </small>
+
+                        </h3>
+
+                    </div>
+
+
+                    <div class="stat-icon speed-icon">
+                        ↯
+                    </div>
+
+                </div>
+
+
+                <div class="progress">
+
+                    <div id="speedBar" class="progress-fill">
+                    </div>
+
+                </div>
+
+
+                <div class="stat-footer">
+
+                    <span>
+                        Current vehicle speed
+                    </span>
+
+                    <span id="speedPercent">
+                        0%
+                    </span>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- TOP SPEED -->
+
+            <div class="stat-card">
+
+                <div class="stat-top">
+
+                    <div>
+
+                        <span class="stat-label">
+                            TOP SPEED
+                        </span>
+
+                        <h3>
+
+                            <span id="topSpeed">
+                                0.0
+                            </span>
+
+                            <small>
+                                km/h
+                            </small>
+
+                        </h3>
+
+                    </div>
+
+
+                    <div class="stat-icon top-icon">
+                        ↗
+                    </div>
+
+                </div>
+
+
+                <div class="mini-line">
+
+                    <span></span>
+
+                </div>
+
+
+                <div class="stat-footer">
+
+                    <span>
+                        Recorded maximum
+                    </span>
+
+                    <span>
+                        HISTORY
+                    </span>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- DISTANCE -->
+
+            <div class="stat-card">
+
+                <div class="stat-top">
+
+                    <div>
+
+                        <span class="stat-label">
+                            DISTANCE
+                        </span>
+
+                        <h3>
+
+                            <span id="distanceValue">
+                                0.00
+                            </span>
+
+                            <small>
+                                km
+                            </small>
+
+                        </h3>
+
+                    </div>
+
+
+                    <div class="stat-icon distance-icon">
+                        ◌
+                    </div>
+
+                </div>
+
+
+                <div class="mini-line">
+
+                    <span></span>
+
+                </div>
+
+
+                <div class="stat-footer">
+
+                    <span>
+                        Calculated route distance
+                    </span>
+
+                    <span>
+                        GPS
+                    </span>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- GPS SATELLITES -->
+
+            <div class="stat-card">
+
+                <div class="stat-top">
+
+                    <div>
+
+                        <span class="stat-label">
+                            GPS SATELLITES
+                        </span>
+
+                        <h3>
+
+                            <span id="satelliteValue">
+                                0
+                            </span>
+
+                            <small>
+                                sat
+                            </small>
+
+                        </h3>
+
+                    </div>
+
+
+                    <div class="stat-icon satellite-icon">
+                        ✦
+                    </div>
+
+                </div>
+
+
+                <div class="satellite-bars" id="satelliteBars">
+
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+
+                </div>
+
+
+                <div class="stat-footer">
+
+                    <span>
+                        GNSS signal strength
+                    </span>
+
+                    <span id="gpsQuality">
+                        NO SIGNAL
+                    </span>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- =====================================================
+             LIVE MAP + TELEMETRY
+        ====================================================== -->
+
+        <section class="content-grid">
+
+
+            <!-- LIVE MAP -->
+
+            <div class="map-card">
+
+                <div class="section-header">
+
+                    <div>
+
+                        <div class="section-kicker">
+                            LIVE LOCATION
+                        </div>
+
+                        <h2>
+                            Vehicle Position
+                        </h2>
+
+                    </div>
+
+
+                    <div class="map-actions">
+
+                        <button id="centerMapBtn">
+                            ◎ Center
+                        </button>
+
+                        <button id="routeToggleBtn">
+                            ◈ Route
+                        </button>
+
+                    </div>
+
+                </div>
+
+
+                <div id="map"></div>
+
+
+                <div class="map-overlay">
+
+                    <div class="map-live">
+
+                        <span></span>
+
+                        LIVE TRACKING
+
+                    </div>
+
+
+                    <div id="mapCoordinates">
+
+                        0.000000, 0.000000
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- TELEMETRY -->
+
+            <div class="telemetry-card">
+
+                <div class="section-kicker">
+                    TELEMETRY
+                </div>
+
+                <h2>
+                    GPS Information
+                </h2>
+
+
+                <div class="telemetry-list">
+
+
+                    <!-- LATITUDE -->
+
+                    <div class="telemetry-item">
+
+                        <div class="telemetry-icon">
+                            LAT
+                        </div>
+
+                        <div>
+
+                            <small>
+                                LATITUDE
+                            </small>
+
+                            <strong id="latitude">
+                                --
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- LONGITUDE -->
+
+                    <div class="telemetry-item">
+
+                        <div class="telemetry-icon">
+                            LNG
+                        </div>
+
+                        <div>
+
+                            <small>
+                                LONGITUDE
+                            </small>
+
+                            <strong id="longitude">
+                                --
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- SPEED -->
+
+                    <div class="telemetry-item">
+
+                        <div class="telemetry-icon">
+                            SPD
+                        </div>
+
+                        <div>
+
+                            <small>
+                                SPEED
+                            </small>
+
+                            <strong id="telemetrySpeed">
+                                0.0 km/h
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- SATELLITES -->
+
+                    <div class="telemetry-item">
+
+                        <div class="telemetry-icon">
+                            SAT
+                        </div>
+
+                        <div>
+
+                            <small>
+                                SATELLITES
+                            </small>
+
+                            <strong id="telemetrySatellites">
+                                0
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+
+                    <!-- GPS TIME -->
+
+                    <div class="telemetry-item">
+
+                        <div class="telemetry-icon">
+                            UTC
+                        </div>
+
+                        <div>
+
+                            <small>
+                                LAST GPS UPDATE
+                            </small>
+
+                            <strong id="gpsTime">
+                                --
+                            </strong>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- =====================================================
+             DAILY TRIP REPLAY
+        ====================================================== -->
+
+        <section class="replay-card">
+
+
+            <!-- REPLAY HEADER -->
+
+            <div class="section-header">
+
+                <div>
+
+                    <div class="section-kicker">
+                        DAILY TRIP REPLAY
+                    </div>
+
+                    <h2>
+                        Today's Journey
+                    </h2>
+
+                    <p class="section-description">
+                        Replay the vehicle movement throughout
+                        the day.
+                    </p>
+
+                </div>
+
+
+                <!-- TRIP SUMMARY -->
+
+                <div class="trip-summary">
+
+                    <div>
+
+                        <small>
+                            TOTAL DISTANCE
+                        </small>
+
+                        <strong id="dailyDistance">
+                            0.00 km
+                        </strong>
+
+                    </div>
+
+
+                    <div>
+
+                        <small>
+                            GPS POINTS
+                        </small>
+
+                        <strong id="dailyPoints">
+                            0
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 REPLAY MAP
+            ================================================== -->
+
+            <div id="replayMap"></div>
+
+
+
+            <!-- =================================================
+                 REPLAY PLAYER
+            ================================================== -->
+
+            <div class="replay-player">
+
+
+                <!-- TIMELINE TIME -->
+
+                <div class="replay-time">
+
+                    <span id="replayCurrentTime">
+                        00:00:00
+                    </span>
+
+
+                    <span id="replayTotalTime">
+                        00:00:00
+                    </span>
+
+                </div>
+
+
+
+                <!-- TIMELINE -->
+
+                <input type="range" id="replaySlider" min="0" max="0" value="0" aria-label="Trip replay timeline">
+
+
+
+                <!-- PLAYER CONTROLS -->
+
+                <div class="replay-controls">
+
+
+                    <!-- MAIN MEDIA CONTROLS -->
+
+                    <div class="replay-main-controls">
+
+
+                        <!-- START -->
+
+                        <button id="replayStartBtn" class="replay-control-btn" title="Go to journey start"
+                            aria-label="Go to journey start">
+
+                            <span class="control-icon">
+                                ⏮
+                            </span>
+
+                            <span class="control-label">
+                                START
+                            </span>
+
+                        </button>
+
+
+
+                        <!-- BACKWARD -->
+
+                        <button id="replayBackBtn" class="replay-control-btn" title="Move backward"
+                            aria-label="Move backward">
+
+                            <span class="control-icon">
+                                ↶
+                            </span>
+
+                            <span class="control-label">
+                                BACK
+                            </span>
+
+                        </button>
+
+
+
+                        <!-- PLAY / PAUSE -->
+
+                        <button id="replayPlayBtn" class="replay-control-btn play-button" title="Play / Pause replay"
+                            aria-label="Play or pause replay">
+
+                            <span class="control-icon">
+                                ▶
+                            </span>
+
+                            <span class="control-label">
+                                PLAY
+                            </span>
+
+                        </button>
+
+
+
+                        <!-- FORWARD -->
+
+                        <button id="replayForwardBtn" class="replay-control-btn" title="Move forward"
+                            aria-label="Move forward">
+
+                            <span class="control-icon">
+                                ↷
+                            </span>
+
+                            <span class="control-label">
+                                FORWARD
+                            </span>
+
+                        </button>
+
+
+
+                        <!-- END -->
+
+                        <button id="replayEndBtn" class="replay-control-btn" title="Go to journey end"
+                            aria-label="Go to journey end">
+
+                            <span class="control-icon">
+                                ⏭
+                            </span>
+
+                            <span class="control-label">
+                                END
+                            </span>
+
+                        </button>
+
+                    </div>
+
+
+
+                    <!-- PLAYBACK SPEED -->
+
+                    <div class="speed-control">
+
+                        <span>
+                            PLAYBACK SPEED
+                        </span>
+
+
+                        <select id="replaySpeed" aria-label="Playback speed">
+
+                            <option value="500">
+                                0.5×
+                            </option>
+
+                            <option value="250" selected>
+                                1×
+                            </option>
+
+                            <option value="120">
+                                2×
+                            </option>
+
+                            <option value="60">
+                                4×
+                            </option>
+
+                            <option value="30">
+                                8×
+                            </option>
+
+                        </select>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- =================================================
+                 JOURNEY INFORMATION
+            ================================================== -->
+
+            <div class="journey-info">
+
+
+                <!-- START -->
+
+                <div class="journey-point">
+
+                    <span class="journey-dot start">
+                    </span>
+
+                    <div>
+
+                        <small>
+                            JOURNEY START
+                        </small>
+
+                        <strong id="journeyStart">
+                            --
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- CONNECTOR -->
+
+                <div class="journey-line"></div>
+
+
+
+                <!-- CURRENT POSITION -->
+
+                <div class="journey-point">
+
+                    <span class="journey-dot current">
+                    </span>
+
+                    <div>
+
+                        <small>
+                            CURRENT POSITION
+                        </small>
+
+                        <strong id="journeyCurrent">
+                            --
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- =====================================================
+             ROUTE HISTORY
+        ====================================================== -->
+
+        <section class="history-card">
+
+
+            <div class="section-header">
+
+                <div>
+
+                    <div class="section-kicker">
+                        ROUTE MONITORING
+                    </div>
+
+                    <h2>
+                        Recent GPS History
+                    </h2>
+
+                </div>
+
+
+                <div class="history-count">
+
+                    <span id="historyCount">
+                        0
+                    </span>
+
+                    POINTS
+
+                </div>
+
+            </div>
+
+
+
+            <div class="table-container">
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>#</th>
+
+                            <th>
+                                TIME
+                            </th>
+
+                            <th>
+                                LATITUDE
+                            </th>
+
+                            <th>
+                                LONGITUDE
+                            </th>
+
+                            <th>
+                                SPEED
+                            </th>
+
+                            <th>
+                                SATELLITES
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody id="historyTable">
+
+                        <tr>
+
+                            <td colspan="6" class="empty">
+
+                                Waiting for GPS history...
+
+                            </td>
+
+                        </tr>
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- =====================================================
+             SYSTEM STATUS
+        ====================================================== -->
+
+        <section class="system-section">
+
+
+            <div class="system-title">
+
+                <div>
+
+                    <div class="section-kicker">
+                        SYSTEM STATUS
+                    </div>
+
+                    <h2>
+                        Device Health
+                    </h2>
+
+                </div>
+
+            </div>
+
+
+
+            <div class="system-grid">
+
+
+                <!-- DEVICE CONNECTION -->
+
+                <div class="system-item">
+
+                    <span class="system-dot" id="wifiStatusDot">
+                    </span>
+
+                    <div>
+
+                        <small>
+                            DEVICE CONNECTION
+                        </small>
+
+                        <strong id="systemConnection">
+                            Waiting...
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- DATABASE -->
+
+                <div class="system-item">
+
+                    <span class="system-dot"></span>
+
+                    <div>
+
+                        <small>
+                            DATABASE
+                        </small>
+
+                        <strong>
+                            FIREBASE RTDB
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- GPS -->
+
+                <div class="system-item">
+
+                    <span class="system-dot"></span>
+
+                    <div>
+
+                        <small>
+                            GPS MODULE
+                        </small>
+
+                        <strong>
+                            GP-02 GNSS
+                        </strong>
+
+                    </div>
+
+                </div>
+
+
+
+                <!-- CONTROLLER -->
+
+                <div class="system-item">
+
+                    <span class="system-dot"></span>
+
+                    <div>
+
+                        <small>
+                            CONTROLLER
+                        </small>
+
+                        <strong>
+                            ESP32
+                        </strong>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+
+    <!-- =========================================================
+         FOOTER
+    ========================================================== -->
+
+    <footer>
+
+        <div>
+
+            <strong>
+                TRACKVISION
+            </strong>
+
+            <span>
+                Vehicle Tracking System
+            </span>
+
+        </div>
+
+
+        <p>
+            ESP32 • GP-02 GNSS • Firebase Realtime Database
+        </p>
+
+
+        <p>
+            © 2026 Vehicle Tracking Project
+        </p>
+
+    </footer>
+
+
+
+    <!-- =========================================================
+         LEAFLET
+    ========================================================== -->
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="">
+    </script>
+
+
+
+    <!-- =========================================================
+         APPLICATION
+    ========================================================== -->
+
+    <script type="module" src="app.js">
+    </script>
+
+</body>
+
+</html>
