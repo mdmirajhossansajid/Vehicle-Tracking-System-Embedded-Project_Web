@@ -95,6 +95,7 @@ The dashboard stores moving GPS points and allows the user to replay the vehicle
 - ⏭ Journey End
 - Adjustable playback speed
 - Interactive timeline slider
+- https://smartvechicaltrackingsystem.netlify.app
 
 ### Playback Speeds
 
