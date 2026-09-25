@@ -11,41 +11,41 @@
 
 import {
     initializeApp
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+} from "https://www..com/firebasejs/10.12.2/firebase-app.js";
 
 import {
     getDatabase,
     ref,
     onValue
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+} from "https://www.gstatic.com/firebasejs/10..2/firebase-database.js";
 
 import {
     getAuth,
     signInAnonymously
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+} from "https://www.gstatic.com//.12.2/firebase-auth.js";
 
 
 const firebaseConfig = {
 
-    apiKey: "AIzaSyA1-eCoOIz0a2cxDe3LsMV3aG_e-7Ioyug",
+    apiKey: "",
 
     authDomain:
-        "vehicle-tracking-system-baac1.firebaseapp.com",
+        "",
 
     databaseURL:
-        "https://vehicle-tracking-system-baac1-default-rtdb.asia-southeast1.firebasedatabase.app",
+        "",
 
     projectId:
-        "vehicle-tracking-system-baac1",
+        "",
 
     storageBucket:
-        "vehicle-tracking-system-baac1.firebasestorage.app",
+        "",
 
     messagingSenderId:
-        "234635677085",
+        "",
 
     appId:
-        "1:234635677085:web:60df702cffd2730dd8f374"
+        "1:::"
 };
 
 
