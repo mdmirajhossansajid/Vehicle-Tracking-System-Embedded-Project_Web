@@ -1,14 +1,3 @@
-/* =========================================================
-   TRACKVISION
-   Professional Vehicle Tracking Dashboard
-   ESP32 + GP-02 GNSS + Firebase Realtime Database
-========================================================= */
-
-
-/* =========================================================
-   FIREBASE
-========================================================= */
-
 import {
     initializeApp
 } from "https://www..com/firebasejs/10.12.2/firebase-app.js";
@@ -25,123 +14,100 @@ import {
 } from "https://www.gstatic.com//.12.2/firebase-auth.js";
 
 
-const firebaseConfig = {
+/* =========================================================
+   FIREBASE
+========================================================= */
 
-    apiKey: "",
+    apiKey: "AIzaSyA1-eCoOIz0a2cxDe3LsMV3aG_e-7Ioyug",
 
     authDomain:
-        "",
+        "vehicle-tracking-system-baac1.firebaseapp.com",
 
     databaseURL:
-        "",
+        "https://vehicle-tracking-system-baac1-default-rtdb.asia-southeast1.firebasedatabase.app",
 
     projectId:
-        "",
+        "vehicle-tracking-system-baac1",
 
     storageBucket:
-        "",
+        "vehicle-tracking-system-baac1.firebasestorage.app",
 
     messagingSenderId:
-        "",
+        "234635677085",
 
     appId:
-        "1:::"
+        "1:234635677085:web:60df702cffd2730dd8f374"
 };
 
-
-/* =========================================================
-   INITIALIZE FIREBASE
-========================================================= */
-
-const app =
-    initializeApp(firebaseConfig);
-
-const database =
-    getDatabase(app);
-
-const auth =
-    getAuth(app);
+const app = initializeApp(firebaseConfig);
+const database = getDatabase(app);
+const auth = getAuth(app);
 
 
 /* =========================================================
-   GLOBAL VARIABLES
+   CONFIGURATION
 ========================================================= */
 
+const DEFAULT_POSITION = [23.8103, 90.4125];
 
-/* ---------- Main Map ---------- */
+const HEARTBEAT_TIMEOUT = 10000;
+const GPS_STALE_TIMEOUT = 10000;
+
+const MAIN_MAP_ZOOM = 16;
+const MAX_SPEED_DISPLAY = 120;
+
+const MARKER_ANIMATION_DURATION = 900;
+
+
+/* =========================================================
+   STATE
+========================================================= */
 
 let map;
-
 let vehicleMarker;
-
 let routeLine;
+let routeGlowLine;
 
 let routeVisible = true;
-
-
-/* ---------- Firebase Data ---------- */
+let autoFollow = true;
 
 let historyData = [];
-
 let latestGPS = null;
 
-let lastFirebaseUpdate = 0;
+let lastGPSUpdate = 0;
+let lastHeartbeat = 0;
+
+let deviceOnline = false;
+let previousDeviceOnline = false;
+
+let markerAnimationFrame = null;
+let markerAnimationStart = null;
+let markerAnimationFrom = null;
+let markerAnimationTo = null;
+
+let mainRouteInitialized = false;
 
 
-/* ---------- Replay ---------- */
+/* =========================================================
+   REPLAY STATE
+========================================================= */
 
 let replayMap;
-
+let replayFullRoute;
 let replayRoute;
-
 let replayMarker;
 
 let replayData = [];
-
 let replayIndex = 0;
 
-let replayTimer = null;
-
 let replayPlaying = false;
+let replayAnimationFrame = null;
 
+let replaySegmentStart = 0;
+let replaySegmentFrom = null;
+let replaySegmentTo = null;
 
-/* =========================================================
-   DEFAULT MAP POSITION
-========================================================= */
-
-const defaultPosition = [
-    23.8103,
-    90.4125
-];
-
-
-/* =========================================================
-   MAIN MAP
-========================================================= */
-
-map = L.map(
-    "map",
-    {
-        zoomControl: true,
-        attributionControl: true
-    }
-).setView(
-    defaultPosition,
-    13
-);
-
-
-/* ---------- OpenStreetMap ---------- */
-
-L.tileLayer(
-    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {
-        maxZoom: 19,
-
-        attribution:
-            "&copy; OpenStreetMap contributors"
-    }
-).addTo(map);
+let replayDirection = 0;
 
 
 /* =========================================================
@@ -149,44 +115,57 @@ L.tileLayer(
 ========================================================= */
 
 const vehicleIcon = L.divIcon({
-
     className: "",
-
     html: `
         <div class="vehicle-marker">
             <span>🚗</span>
         </div>
     `,
-
     iconSize: [42, 42],
-
     iconAnchor: [21, 21],
-
     popupAnchor: [0, -25]
-
 });
 
 
 /* =========================================================
-   MAIN ROUTE
+   MAIN MAP
 ========================================================= */
 
-routeLine = L.polyline(
-    [],
+map = L.map("map", {
+    zoomControl: true,
+    attributionControl: true
+}).setView(DEFAULT_POSITION, 13);
+
+L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {
-        color: "#66f2a5",
-
-        weight: 4,
-
-        opacity: 0.75,
-
-        smoothFactor: 1
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
     }
 ).addTo(map);
 
 
 /* =========================================================
-   FIREBASE LOGIN
+   ROUTE LAYERS
+========================================================= */
+
+routeGlowLine = L.polyline([], {
+    color: "#66f2a5",
+    weight: 10,
+    opacity: 0.10,
+    smoothFactor: 1
+}).addTo(map);
+
+routeLine = L.polyline([], {
+    color: "#66f2a5",
+    weight: 4,
+    opacity: 0.80,
+    smoothFactor: 1
+}).addTo(map);
+
+
+/* =========================================================
+   FIREBASE
 ========================================================= */
 
 async function startFirebase() {
@@ -222,400 +201,257 @@ async function startFirebase() {
 
 function listenToFirebase() {
 
+    const gpsRef = ref(
+        database,
+        "gps"
+    );
 
-    /* =====================================================
-       CURRENT GPS
-    ===================================================== */
+    const historyRef = ref(
+        database,
+        "history"
+    );
 
-    const gpsRef =
-        ref(
-            database,
-            "gps"
-        );
+    const heartbeatRef = ref(
+        database,
+        "status/heartbeat"
+    );
 
+
+    /* ---------- GPS ---------- */
 
     onValue(
-
         gpsRef,
+        snapshot => {
 
-        (snapshot) => {
-
-            const data =
-                snapshot.val();
-
+            const data = snapshot.val();
 
             if (!data) {
-
-                updateConnection(
-                    false,
-                    "No GPS data"
-                );
-
                 return;
             }
 
+            const lat = Number(data.lat);
+            const lng = Number(data.lng);
 
-            latestGPS =
-                data;
+            if (
+                !Number.isFinite(lat) ||
+                !Number.isFinite(lng)
+            ) {
+                return;
+            }
 
+            latestGPS = data;
 
-            lastFirebaseUpdate =
-                Date.now();
+            lastGPSUpdate = Date.now();
 
-
-            updateGPSDashboard(
-                data
-            );
+            updateGPSDashboard(data);
 
         },
-
-        (error) => {
+        error => {
 
             console.error(
                 "GPS listener error:",
                 error
             );
-
-            updateConnection(
-                false,
-                "Database error"
-            );
-
         }
     );
 
 
-    /* =====================================================
-       HISTORY
-    ===================================================== */
-
-    const historyRef =
-        ref(
-            database,
-            "history"
-        );
-
+    /* ---------- History ---------- */
 
     onValue(
-
         historyRef,
+        snapshot => {
 
-        (snapshot) => {
-
-            const data =
-                snapshot.val();
-
+            const data = snapshot.val();
 
             if (!data) {
 
                 historyData = [];
 
                 updateHistory([]);
-
+                drawRoute([]);
+                calculateStatistics([]);
                 updateDailyReplay([]);
 
                 return;
             }
 
+            historyData = Object.entries(data)
+                .map(([id, value]) => ({
+                    id,
+                    ...value
+                }))
+                .filter(item =>
+                    Number.isFinite(Number(item.lat)) &&
+                    Number.isFinite(Number(item.lng))
+                )
+                .sort(
+                    (a, b) =>
+                        getTimestamp(a) -
+                        getTimestamp(b)
+                );
 
-            historyData =
-                Object.entries(data)
-
-                    .map(
-                        ([id, value]) => ({
-                            id,
-                            ...value
-                        })
-                    )
-
-                    .filter(
-                        item =>
-
-                            Number.isFinite(
-                                Number(item.lat)
-                            ) &&
-
-                            Number.isFinite(
-                                Number(item.lng)
-                            )
-                    )
-
-                    .sort(
-                        (a, b) =>
-                            getTimestamp(a) -
-                            getTimestamp(b)
-                    );
-
-
-            updateHistory(
-                historyData
-            );
-
-
-            drawRoute(
-                historyData
-            );
-
-
-            calculateStatistics(
-                historyData
-            );
-
-
-            updateDailyReplay(
-                historyData
-            );
+            updateHistory(historyData);
+            drawRoute(historyData);
+            calculateStatistics(historyData);
+            updateDailyReplay(historyData);
 
         },
-
-        (error) => {
+        error => {
 
             console.error(
                 "History listener error:",
                 error
             );
-
         }
     );
 
 
-    /* =====================================================
-       HEARTBEAT
-    ===================================================== */
-
-    const heartbeatRef =
-        ref(
-            database,
-            "status/heartbeat"
-        );
-
+    /* ---------- Heartbeat ---------- */
 
     onValue(
-
         heartbeatRef,
+        snapshot => {
 
-        (snapshot) => {
+            const value = snapshot.val();
 
-            const heartbeat =
-                snapshot.val();
+            const timestamp =
+                normalizeTimestamp(value);
 
-            console.log(
-                "ESP32 heartbeat:",
-                heartbeat
+            if (!timestamp) {
+                return;
+            }
+
+            lastHeartbeat = timestamp;
+
+            evaluateConnection();
+
+        },
+        error => {
+
+            console.error(
+                "Heartbeat listener error:",
+                error
             );
 
+            updateConnection(
+                false,
+                "Heartbeat error"
+            );
         }
     );
 }
 
 
 /* =========================================================
-   GPS DASHBOARD UPDATE
+   GPS DASHBOARD
 ========================================================= */
 
-function updateGPSDashboard(
-    data
-) {
+function updateGPSDashboard(data) {
 
-    const lat =
-        Number(data.lat);
-
-    const lng =
-        Number(data.lng);
+    const lat = Number(data.lat);
+    const lng = Number(data.lng);
 
     const speed =
-        Number(data.speed) || 0;
+        Number.isFinite(Number(data.speed))
+            ? Math.max(0, Number(data.speed))
+            : 0;
 
     const sats =
-        Number(data.sats) || 0;
+        Number.isFinite(Number(data.sats))
+            ? Math.max(0, Number(data.sats))
+            : 0;
 
 
     if (
         !Number.isFinite(lat) ||
         !Number.isFinite(lng)
     ) {
-
         return;
     }
 
 
-    /* =====================================================
-       SPEED
-    ===================================================== */
+    /* ---------- Speed ---------- */
 
-    const speedValue =
-        document.getElementById(
-            "speedValue"
-        );
+    setText(
+        "speedValue",
+        speed.toFixed(1)
+    );
 
-    if (speedValue) {
-
-        speedValue.textContent =
-            speed.toFixed(1);
-    }
-
-
-    const telemetrySpeed =
-        document.getElementById(
-            "telemetrySpeed"
-        );
-
-    if (telemetrySpeed) {
-
-        telemetrySpeed.textContent =
-            `${speed.toFixed(1)} km/h`;
-    }
+    setText(
+        "telemetrySpeed",
+        `${speed.toFixed(1)} km/h`
+    );
 
 
     const speedPercent =
         Math.min(
-            (speed / 120) * 100,
+            (speed / MAX_SPEED_DISPLAY) * 100,
             100
         );
 
+    setStyle(
+        "speedBar",
+        "width",
+        `${speedPercent}%`
+    );
 
-    const speedBar =
-        document.getElementById(
-            "speedBar"
-        );
-
-    if (speedBar) {
-
-        speedBar.style.width =
-            `${speedPercent}%`;
-    }
-
-
-    const speedPercentElement =
-        document.getElementById(
-            "speedPercent"
-        );
-
-    if (speedPercentElement) {
-
-        speedPercentElement.textContent =
-            `${Math.round(speedPercent)}%`;
-    }
-
-
-    /* =====================================================
-       SATELLITES
-    ===================================================== */
-
-    const satelliteValue =
-        document.getElementById(
-            "satelliteValue"
-        );
-
-    if (satelliteValue) {
-
-        satelliteValue.textContent =
-            sats;
-    }
-
-
-    const telemetrySatellites =
-        document.getElementById(
-            "telemetrySatellites"
-        );
-
-    if (telemetrySatellites) {
-
-        telemetrySatellites.textContent =
-            sats;
-    }
-
-
-    updateSatelliteBars(
-        sats
+    setText(
+        "speedPercent",
+        `${Math.round(speedPercent)}%`
     );
 
 
-    /* =====================================================
-       COORDINATES
-    ===================================================== */
+    /* ---------- Satellites ---------- */
 
-    const latitude =
-        document.getElementById(
-            "latitude"
-        );
+    setText(
+        "satelliteValue",
+        sats
+    );
 
-    if (latitude) {
+    setText(
+        "telemetrySatellites",
+        sats
+    );
 
-        latitude.textContent =
-            lat.toFixed(6);
-    }
-
-
-    const longitude =
-        document.getElementById(
-            "longitude"
-        );
-
-    if (longitude) {
-
-        longitude.textContent =
-            lng.toFixed(6);
-    }
+    updateSatelliteBars(sats);
 
 
-    const mapCoordinates =
-        document.getElementById(
-            "mapCoordinates"
-        );
+    /* ---------- Coordinates ---------- */
 
-    if (mapCoordinates) {
+    setText(
+        "latitude",
+        lat.toFixed(6)
+    );
 
-        mapCoordinates.textContent =
-            `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-    }
+    setText(
+        "longitude",
+        lng.toFixed(6)
+    );
+
+    setText(
+        "mapCoordinates",
+        `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+    );
 
 
-    /* =====================================================
-       TIME
-    ===================================================== */
+    /* ---------- Time ---------- */
 
     const timestamp =
         getTimestamp(data);
 
+    setText(
+        "gpsTime",
+        formatDate(timestamp)
+    );
 
-    const gpsTime =
-        document.getElementById(
-            "gpsTime"
-        );
-
-    if (gpsTime) {
-
-        gpsTime.textContent =
-            formatDate(timestamp);
-    }
-
-
-    const lastUpdate =
-        document.getElementById(
-            "lastUpdate"
-        );
-
-    if (lastUpdate) {
-
-        lastUpdate.textContent =
-            `Updated ${formatTime(timestamp)}`;
-    }
-
-
-    /* =====================================================
-       CONNECTION
-    ===================================================== */
-
-    updateConnection(
-        true,
-        "GPS signal active"
+    setText(
+        "lastUpdate",
+        `Updated ${formatTime(timestamp)}`
     );
 
 
-    /* =====================================================
-       MAIN MAP
-    ===================================================== */
+    /* ---------- Map ---------- */
 
     updateVehicleMarker(
         lat,
@@ -623,6 +459,9 @@ function updateGPSDashboard(
         speed,
         sats
     );
+
+
+    evaluateConnection();
 }
 
 
@@ -637,23 +476,16 @@ function updateVehicleMarker(
     sats
 ) {
 
-    const position = [
-        lat,
-        lng
-    ];
-
+    const target = [lat, lng];
 
     if (!vehicleMarker) {
 
-        vehicleMarker =
-            L.marker(
-                position,
-                {
-                    icon: vehicleIcon
-                }
-            )
-            .addTo(map);
-
+        vehicleMarker = L.marker(
+            target,
+            {
+                icon: vehicleIcon
+            }
+        ).addTo(map);
 
         vehicleMarker.bindPopup(
             createPopup(
@@ -664,46 +496,118 @@ function updateVehicleMarker(
             )
         );
 
-
         map.setView(
-            position,
-            16
-        );
-
-    }
-
-    else {
-
-        vehicleMarker.setLatLng(
-            position
-        );
-
-
-        vehicleMarker.setPopupContent(
-            createPopup(
-                lat,
-                lng,
-                speed,
-                sats
-            )
-        );
-    }
-
-
-    /* ---------- Smooth Pan ---------- */
-
-    if (
-        map.getZoom() >= 14
-    ) {
-
-        map.panTo(
-            position,
+            target,
+            MAIN_MAP_ZOOM,
             {
-                animate: true,
-                duration: .8
+                animate: true
             }
         );
+
+        mainRouteInitialized = true;
+
+        return;
     }
+
+
+    const current =
+        vehicleMarker.getLatLng();
+
+
+    markerAnimationFrom = [
+        current.lat,
+        current.lng
+    ];
+
+    markerAnimationTo = target;
+
+    markerAnimationStart = performance.now();
+
+
+    if (markerAnimationFrame) {
+        cancelAnimationFrame(
+            markerAnimationFrame
+        );
+    }
+
+
+    function animateMarker(now) {
+
+        const elapsed =
+            now - markerAnimationStart;
+
+        const progress =
+            Math.min(
+                elapsed / MARKER_ANIMATION_DURATION,
+                1
+            );
+
+        const eased =
+            easeInOutCubic(progress);
+
+        const lat =
+            markerAnimationFrom[0] +
+            (
+                markerAnimationTo[0] -
+                markerAnimationFrom[0]
+            ) * eased;
+
+        const lng =
+            markerAnimationFrom[1] +
+            (
+                markerAnimationTo[1] -
+                markerAnimationFrom[1]
+            ) * eased;
+
+
+        vehicleMarker.setLatLng([
+            lat,
+            lng
+        ]);
+
+
+        if (
+            autoFollow &&
+            map.getZoom() >= 14
+        ) {
+
+            map.panTo(
+                [lat, lng],
+                {
+                    animate: false
+                }
+            );
+        }
+
+
+        if (progress < 1) {
+
+            markerAnimationFrame =
+                requestAnimationFrame(
+                    animateMarker
+                );
+
+        } else {
+
+            markerAnimationFrame = null;
+        }
+    }
+
+
+    markerAnimationFrame =
+        requestAnimationFrame(
+            animateMarker
+        );
+
+
+    vehicleMarker.setPopupContent(
+        createPopup(
+            lat,
+            lng,
+            speed,
+            sats
+        )
+    );
 }
 
 
@@ -719,12 +623,16 @@ function createPopup(
 ) {
 
     return `
-
-        <div style="min-width:180px">
+        <div style="
+            min-width:190px;
+            font-family:Inter,Arial,sans-serif;
+            line-height:1.7;
+        ">
 
             <strong style="
                 color:#66f2a5;
-                font-size:12px;
+                font-size:13px;
+                letter-spacing:1px;
             ">
                 TRACKVISION
             </strong>
@@ -732,7 +640,7 @@ function createPopup(
             <hr style="
                 border:0;
                 border-top:1px solid #29313b;
-                margin:8px 0;
+                margin:7px 0;
             ">
 
             <div>
@@ -755,25 +663,746 @@ function createPopup(
                 ${sats}
             </div>
 
-        </div>
+            <div style="
+                margin-top:5px;
+                color:#66f2a5;
+                font-weight:600;
+            ">
+                ● LIVE TRACKING
+            </div>
 
+        </div>
     `;
 }
 
 
 /* =========================================================
-   HISTORY TABLE
+   ROUTE
 ========================================================= */
 
-function updateHistory(
-    data
+function drawRoute(data) {
+
+    const points = data
+        .filter(item =>
+            Number.isFinite(Number(item.lat)) &&
+            Number.isFinite(Number(item.lng))
+        )
+        .map(item => [
+            Number(item.lat),
+            Number(item.lng)
+        ]);
+
+
+    routeLine.setLatLngs(points);
+    routeGlowLine.setLatLngs(points);
+
+
+    if (
+        points.length &&
+        !mainRouteInitialized
+    ) {
+
+        map.fitBounds(
+            routeLine.getBounds(),
+            {
+                padding: [40, 40]
+            }
+        );
+
+        mainRouteInitialized = true;
+    }
+}
+
+
+/* =========================================================
+   ROUTE TOGGLE
+========================================================= */
+
+const routeToggleBtn =
+    document.getElementById(
+        "routeToggleBtn"
+    );
+
+if (routeToggleBtn) {
+
+    routeToggleBtn.addEventListener(
+        "click",
+        () => {
+
+            routeVisible =
+                !routeVisible;
+
+            if (routeVisible) {
+
+                routeLine.addTo(map);
+                routeGlowLine.addTo(map);
+
+                routeToggleBtn.classList.add(
+                    "active"
+                );
+
+                routeToggleBtn.innerHTML =
+                    "◈ Route";
+
+            } else {
+
+                map.removeLayer(
+                    routeLine
+                );
+
+                map.removeLayer(
+                    routeGlowLine
+                );
+
+                routeToggleBtn.classList.remove(
+                    "active"
+                );
+
+                routeToggleBtn.innerHTML =
+                    "◇ Route";
+            }
+        }
+    );
+}
+
+
+/* =========================================================
+   CENTER MAP
+========================================================= */
+
+const centerMapBtn =
+    document.getElementById(
+        "centerMapBtn"
+    );
+
+if (centerMapBtn) {
+
+    centerMapBtn.addEventListener(
+        "click",
+        () => {
+
+            if (!latestGPS) {
+                return;
+            }
+
+            const lat =
+                Number(latestGPS.lat);
+
+            const lng =
+                Number(latestGPS.lng);
+
+            if (
+                !Number.isFinite(lat) ||
+                !Number.isFinite(lng)
+            ) {
+                return;
+            }
+
+            autoFollow = true;
+
+            map.setView(
+                [lat, lng],
+                MAIN_MAP_ZOOM,
+                {
+                    animate: true
+                }
+            );
+        }
+    );
+}
+
+
+/* =========================================================
+   MAP INTERACTION
+========================================================= */
+
+map.on(
+    "dragstart",
+    () => {
+        autoFollow = false;
+    }
+);
+
+map.on(
+    "zoomstart",
+    () => {
+        autoFollow = false;
+    }
+);
+
+
+/* =========================================================
+   STATISTICS
+========================================================= */
+
+function calculateStatistics(data) {
+
+    if (!data.length) {
+
+        setText(
+            "topSpeed",
+            "0.0"
+        );
+
+        setText(
+            "distanceValue",
+            "0.00"
+        );
+
+        return;
+    }
+
+
+    const topSpeed =
+        Math.max(
+            ...data.map(
+                item =>
+                    Number(item.speed) || 0
+            )
+        );
+
+
+    let totalDistance = 0;
+
+
+    for (
+        let i = 1;
+        i < data.length;
+        i++
+    ) {
+
+        totalDistance +=
+            calculateDistance(
+                Number(data[i - 1].lat),
+                Number(data[i - 1].lng),
+                Number(data[i].lat),
+                Number(data[i].lng)
+            );
+    }
+
+
+    setText(
+        "topSpeed",
+        topSpeed.toFixed(1)
+    );
+
+    setText(
+        "distanceValue",
+        totalDistance.toFixed(2)
+    );
+}
+
+
+/* =========================================================
+   DISTANCE
+========================================================= */
+
+function calculateDistance(
+    lat1,
+    lon1,
+    lat2,
+    lon2
 ) {
+
+    if (
+        !Number.isFinite(lat1) ||
+        !Number.isFinite(lon1) ||
+        !Number.isFinite(lat2) ||
+        !Number.isFinite(lon2)
+    ) {
+        return 0;
+    }
+
+
+    const R = 6371;
+
+    const dLat =
+        degreesToRadians(
+            lat2 - lat1
+        );
+
+    const dLon =
+        degreesToRadians(
+            lon2 - lon1
+        );
+
+
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(
+            degreesToRadians(lat1)
+        ) *
+        Math.cos(
+            degreesToRadians(lat2)
+        ) *
+        Math.sin(dLon / 2) ** 2;
+
+
+    const c =
+        2 *
+        Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+        );
+
+
+    return R * c;
+}
+
+
+function degreesToRadians(
+    degrees
+) {
+
+    return (
+        degrees *
+        Math.PI /
+        180
+    );
+}
+
+
+/* =========================================================
+   SATELLITES
+========================================================= */
+
+function updateSatelliteBars(
+    satellites
+) {
+
+    const bars =
+        document.querySelectorAll(
+            "#satelliteBars span"
+        );
+
+
+    const active =
+        Math.min(
+            Math.max(
+                Number(satellites) || 0,
+                0
+            ),
+            8
+        );
+
+
+    bars.forEach(
+        (bar, index) => {
+
+            const enabled =
+                index < active;
+
+            bar.style.background =
+                enabled
+                    ? "#66f2a5"
+                    : "#26313d";
+
+            bar.style.boxShadow =
+                enabled
+                    ? "0 0 7px rgba(102,242,165,.5)"
+                    : "none";
+
+            bar.classList.toggle(
+                "active",
+                enabled
+            );
+        }
+    );
+
+
+    const quality =
+        document.getElementById(
+            "gpsQuality"
+        );
+
+    if (!quality) {
+        return;
+    }
+
+
+    if (satellites >= 10) {
+
+        quality.textContent =
+            "EXCELLENT";
+
+    } else if (satellites >= 7) {
+
+        quality.textContent =
+            "GOOD";
+
+    } else if (satellites >= 4) {
+
+        quality.textContent =
+            "FAIR";
+
+    } else {
+
+        quality.textContent =
+            "NO SIGNAL";
+    }
+}
+
+
+/* =========================================================
+   CONNECTION ENGINE
+========================================================= */
+
+function evaluateConnection() {
+
+    const now = Date.now();
+
+    const heartbeatAge =
+        lastHeartbeat
+            ? now - lastHeartbeat
+            : Infinity;
+
+    const gpsAge =
+        lastGPSUpdate
+            ? now - lastGPSUpdate
+            : Infinity;
+
+
+    const heartbeatAlive =
+        heartbeatAge <= HEARTBEAT_TIMEOUT;
+
+
+    const gpsAlive =
+        gpsAge <= GPS_STALE_TIMEOUT;
+
+
+    const online =
+        heartbeatAlive &&
+        gpsAlive;
+
+
+    if (online !== deviceOnline) {
+
+        previousDeviceOnline =
+            deviceOnline;
+
+        deviceOnline =
+            online;
+
+        if (online) {
+
+            updateConnection(
+                true,
+                "Device connected"
+            );
+
+        } else {
+
+            updateConnection(
+                false,
+                "Device offline"
+            );
+
+            resetLiveTelemetry();
+        }
+
+    } else if (!online) {
+
+        updateConnection(
+            false,
+            "Device offline"
+        );
+    }
+}
+
+
+/* =========================================================
+   CONNECTION UI
+========================================================= */
+
+function updateConnection(
+    online,
+    message
+) {
+
+    const dot =
+        document.getElementById(
+            "connectionDot"
+        );
+
+    const status =
+        document.getElementById(
+            "deviceStatus"
+        );
+
+    const system =
+        document.getElementById(
+            "systemConnection"
+        );
+
+    const lastUpdate =
+        document.getElementById(
+            "lastUpdate"
+        );
+
+
+    if (online) {
+
+        if (dot) {
+            dot.className =
+                "status-dot online";
+        }
+
+        if (status) {
+            status.textContent =
+                "ONLINE";
+        }
+
+        if (system) {
+            system.textContent =
+                "CONNECTED";
+        }
+
+        if (lastUpdate) {
+
+            const age =
+                lastGPSUpdate
+                    ? Math.floor(
+                        (
+                            Date.now() -
+                            lastGPSUpdate
+                        ) / 1000
+                    )
+                    : 0;
+
+            lastUpdate.textContent =
+                age <= 1
+                    ? "Live GPS connection"
+                    : `Updated ${age}s ago`;
+        }
+
+    } else {
+
+        if (dot) {
+            dot.className =
+                "status-dot offline";
+        }
+
+        if (status) {
+            status.textContent =
+                "OFFLINE";
+        }
+
+        if (system) {
+            system.textContent =
+                message ||
+                "DISCONNECTED";
+        }
+
+        if (lastUpdate) {
+            lastUpdate.textContent =
+                "Device connection lost";
+        }
+    }
+}
+
+
+/* =========================================================
+   RESET LIVE TELEMETRY
+========================================================= */
+
+function resetLiveTelemetry() {
+
+    setText(
+        "speedValue",
+        "0.0"
+    );
+
+    setText(
+        "telemetrySpeed",
+        "0.0 km/h"
+    );
+
+    setText(
+        "speedPercent",
+        "0%"
+    );
+
+    setStyle(
+        "speedBar",
+        "width",
+        "0%"
+    );
+
+
+    setText(
+        "gpsQuality",
+        "OFFLINE"
+    );
+
+
+    updateSatelliteBars(0);
+
+
+    const marker =
+        document.querySelector(
+            ".vehicle-marker"
+        );
+
+    if (marker) {
+        marker.classList.add(
+            "offline"
+        );
+    }
+}
+
+
+/* =========================================================
+   TIMESTAMP
+========================================================= */
+
+function getTimestamp(data) {
+
+    if (!data) {
+        return Date.now();
+    }
+
+    return normalizeTimestamp(
+        data.timestamp
+    );
+}
+
+
+function normalizeTimestamp(
+    value
+) {
+
+    if (
+        typeof value === "number" &&
+        Number.isFinite(value)
+    ) {
+
+        return value < 100000000000
+            ? value * 1000
+            : value;
+    }
+
+
+    if (
+        typeof value === "string"
+    ) {
+
+        const trimmed =
+            value.trim();
+
+
+        if (
+            /^\d+(\.\d+)?$/.test(
+                trimmed
+            )
+        ) {
+
+            const number =
+                Number(trimmed);
+
+            return number < 100000000000
+                ? number * 1000
+                : number;
+        }
+
+
+        const parsed =
+            Date.parse(trimmed);
+
+        if (!Number.isNaN(parsed)) {
+            return parsed;
+        }
+    }
+
+
+    if (
+        value &&
+        typeof value === "object"
+    ) {
+
+        if (
+            typeof value[".sv"] ===
+            "number"
+        ) {
+
+            return normalizeTimestamp(
+                value[".sv"]
+            );
+        }
+
+
+        if (
+            value[".sv"] ===
+            "timestamp"
+        ) {
+
+            return Date.now();
+        }
+    }
+
+
+    return Date.now();
+}
+
+
+/* =========================================================
+   TIME FORMAT
+========================================================= */
+
+function formatTime(
+    timestamp
+) {
+
+    if (!timestamp) {
+        return "--";
+    }
+
+    return new Date(
+        timestamp
+    ).toLocaleTimeString(
+        [],
+        {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        }
+    );
+}
+
+
+function formatDate(
+    timestamp
+) {
+
+    if (!timestamp) {
+        return "--";
+    }
+
+    return new Date(
+        timestamp
+    ).toLocaleString(
+        [],
+        {
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit"
+        }
+    );
+}
+
+
+/* =========================================================
+   HISTORY
+========================================================= */
+
+function updateHistory(data) {
 
     const table =
         document.getElementById(
             "historyTable"
         );
-
 
     const count =
         document.getElementById(
@@ -782,14 +1411,12 @@ function updateHistory(
 
 
     if (count) {
-
         count.textContent =
             data.length;
     }
 
 
     if (!table) {
-
         return;
     }
 
@@ -797,39 +1424,25 @@ function updateHistory(
     if (!data.length) {
 
         table.innerHTML = `
-
             <tr>
-
-                <td
-                    colspan="6"
-                    class="empty"
-                >
+                <td colspan="6" class="empty">
                     Waiting for GPS history...
                 </td>
-
             </tr>
-
         `;
 
         return;
     }
 
 
-    /* ---------- Latest 12 ---------- */
-
     const latest =
         [...data]
             .reverse()
-            .slice(
-                0,
-                12
-            );
+            .slice(0, 12);
 
 
     table.innerHTML =
-
         latest
-
             .map(
                 (item, index) => `
 
@@ -866,600 +1479,14 @@ function updateHistory(
                         </td>
 
                     </tr>
-
                 `
             )
-
             .join("");
 }
 
 
 /* =========================================================
-   DRAW MAIN ROUTE
-========================================================= */
-
-function drawRoute(
-    data
-) {
-
-    const points =
-
-        data
-
-            .filter(
-                item =>
-
-                    Number.isFinite(
-                        Number(item.lat)
-                    ) &&
-
-                    Number.isFinite(
-                        Number(item.lng)
-                    )
-            )
-
-            .map(
-                item => [
-                    Number(item.lat),
-                    Number(item.lng)
-                ]
-            );
-
-
-    routeLine.setLatLngs(
-        points
-    );
-}
-
-
-/* =========================================================
-   STATISTICS
-========================================================= */
-
-function calculateStatistics(
-    data
-) {
-
-    if (!data.length) {
-
-        return;
-    }
-
-
-    /* =====================================================
-       TOP SPEED
-    ===================================================== */
-
-    const topSpeed =
-
-        Math.max(
-            ...data.map(
-                item =>
-                    Number(item.speed) || 0
-            )
-        );
-
-
-    const topSpeedElement =
-        document.getElementById(
-            "topSpeed"
-        );
-
-
-    if (topSpeedElement) {
-
-        topSpeedElement.textContent =
-            topSpeed.toFixed(1);
-    }
-
-
-    /* =====================================================
-       DISTANCE
-    ===================================================== */
-
-    let totalDistance = 0;
-
-
-    for (
-        let i = 1;
-        i < data.length;
-        i++
-    ) {
-
-        const previous =
-            data[i - 1];
-
-        const current =
-            data[i];
-
-
-        totalDistance +=
-
-            calculateDistance(
-
-                Number(previous.lat),
-
-                Number(previous.lng),
-
-                Number(current.lat),
-
-                Number(current.lng)
-
-            );
-    }
-
-
-    const distanceElement =
-        document.getElementById(
-            "distanceValue"
-        );
-
-
-    if (distanceElement) {
-
-        distanceElement.textContent =
-            totalDistance.toFixed(2);
-    }
-}
-
-
-/* =========================================================
-   HAVERSINE DISTANCE
-========================================================= */
-
-function calculateDistance(
-    lat1,
-    lon1,
-    lat2,
-    lon2
-) {
-
-    const R = 6371;
-
-
-    const dLat =
-        degreesToRadians(
-            lat2 - lat1
-        );
-
-
-    const dLon =
-        degreesToRadians(
-            lon2 - lon1
-        );
-
-
-    const a =
-
-        Math.sin(
-            dLat / 2
-        ) ** 2 +
-
-        Math.cos(
-            degreesToRadians(lat1)
-        ) *
-
-        Math.cos(
-            degreesToRadians(lat2)
-        ) *
-
-        Math.sin(
-            dLon / 2
-        ) ** 2;
-
-
-    const c =
-
-        2 *
-
-        Math.atan2(
-            Math.sqrt(a),
-            Math.sqrt(1 - a)
-        );
-
-
-    return R * c;
-}
-
-
-function degreesToRadians(
-    degrees
-) {
-
-    return degrees *
-        Math.PI /
-        180;
-}
-
-
-/* =========================================================
-   SATELLITE BARS
-========================================================= */
-
-function updateSatelliteBars(
-    satellites
-) {
-
-    const bars =
-        document.querySelectorAll(
-            "#satelliteBars span"
-        );
-
-
-    const active =
-
-        Math.min(
-            Math.max(
-                satellites,
-                0
-            ),
-            8
-        );
-
-
-    bars.forEach(
-        (bar, index) => {
-
-            if (
-                index < active
-            ) {
-
-                bar.style.background =
-                    "#66f2a5";
-
-                bar.style.boxShadow =
-                    "0 0 7px rgba(102,242,165,.5)";
-
-            }
-
-            else {
-
-                bar.style.background =
-                    "#26313d";
-
-                bar.style.boxShadow =
-                    "none";
-            }
-
-        }
-    );
-
-
-    const quality =
-        document.getElementById(
-            "gpsQuality"
-        );
-
-
-    if (!quality) {
-
-        return;
-    }
-
-
-    if (satellites >= 8) {
-
-        quality.textContent =
-            "EXCELLENT";
-
-    }
-
-    else if (satellites >= 5) {
-
-        quality.textContent =
-            "GOOD";
-
-    }
-
-    else if (satellites >= 4) {
-
-        quality.textContent =
-            "FAIR";
-
-    }
-
-    else {
-
-        quality.textContent =
-            "WEAK";
-    }
-}
-
-
-/* =========================================================
-   CONNECTION STATUS
-========================================================= */
-
-function updateConnection(
-    online,
-    message
-) {
-
-    const dot =
-        document.getElementById(
-            "connectionDot"
-        );
-
-
-    const status =
-        document.getElementById(
-            "deviceStatus"
-        );
-
-
-    const system =
-        document.getElementById(
-            "systemConnection"
-        );
-
-
-    if (online) {
-
-        if (dot) {
-
-            dot.className =
-                "status-dot online";
-        }
-
-
-        if (status) {
-
-            status.textContent =
-                "ONLINE";
-        }
-
-
-        if (system) {
-
-            system.textContent =
-                "CONNECTED";
-        }
-
-    }
-
-    else {
-
-        if (dot) {
-
-            dot.className =
-                "status-dot offline";
-        }
-
-
-        if (status) {
-
-            status.textContent =
-                "OFFLINE";
-        }
-
-
-        if (system) {
-
-            system.textContent =
-                message ||
-                "DISCONNECTED";
-        }
-    }
-}
-
-
-/* =========================================================
-   TIMESTAMP
-========================================================= */
-
-function getTimestamp(
-    data
-) {
-
-    if (!data) {
-
-        return Date.now();
-    }
-
-
-    const timestamp =
-        data.timestamp;
-
-
-    if (
-        typeof timestamp ===
-        "number"
-    ) {
-
-        return timestamp;
-    }
-
-
-    if (
-        typeof timestamp ===
-        "string"
-    ) {
-
-        const parsed =
-            Date.parse(
-                timestamp
-            );
-
-
-        if (
-            !Number.isNaN(parsed)
-        ) {
-
-            return parsed;
-        }
-    }
-
-
-    if (
-        timestamp &&
-        typeof timestamp ===
-        "object"
-    ) {
-
-        if (
-            typeof timestamp[".sv"] ===
-            "number"
-        ) {
-
-            return timestamp[".sv"];
-        }
-    }
-
-
-    return Date.now();
-}
-
-
-/* =========================================================
-   FORMAT TIME
-========================================================= */
-
-function formatTime(
-    timestamp
-) {
-
-    if (!timestamp) {
-
-        return "--";
-    }
-
-
-    return new Date(
-        timestamp
-    ).toLocaleTimeString(
-        [],
-        {
-            hour: "2-digit",
-
-            minute: "2-digit",
-
-            second: "2-digit"
-        }
-    );
-}
-
-
-function formatDate(
-    timestamp
-) {
-
-    if (!timestamp) {
-
-        return "--";
-    }
-
-
-    return new Date(
-        timestamp
-    ).toLocaleString(
-        [],
-        {
-            year: "numeric",
-
-            month: "short",
-
-            day: "2-digit",
-
-            hour: "2-digit",
-
-            minute: "2-digit",
-
-            second: "2-digit"
-        }
-    );
-}
-
-
-/* =========================================================
-   CENTER MAP BUTTON
-========================================================= */
-
-const centerMapBtn =
-    document.getElementById(
-        "centerMapBtn"
-    );
-
-
-if (centerMapBtn) {
-
-    centerMapBtn.addEventListener(
-        "click",
-        () => {
-
-            if (!latestGPS) {
-
-                return;
-            }
-
-
-            const position = [
-
-                Number(
-                    latestGPS.lat
-                ),
-
-                Number(
-                    latestGPS.lng
-                )
-
-            ];
-
-
-            map.setView(
-                position,
-                16,
-                {
-                    animate: true
-                }
-            );
-
-        }
-    );
-}
-
-
-/* =========================================================
-   ROUTE TOGGLE
-========================================================= */
-
-const routeToggleBtn =
-    document.getElementById(
-        "routeToggleBtn"
-    );
-
-
-if (routeToggleBtn) {
-
-    routeToggleBtn.addEventListener(
-        "click",
-        () => {
-
-            if (routeVisible) {
-
-                map.removeLayer(
-                    routeLine
-                );
-
-                routeVisible = false;
-
-            }
-
-            else {
-
-                routeLine.addTo(
-                    map
-                );
-
-                routeVisible = true;
-            }
-
-        }
-    );
-}
-
-
-/* =========================================================
-   DAILY TRIP REPLAY MAP
+   REPLAY MAP
 ========================================================= */
 
 replayMap =
@@ -1467,74 +1494,75 @@ replayMap =
         "replayMap",
         {
             zoomControl: true,
-
             attributionControl: true
         }
-    )
-    .setView(
-        defaultPosition,
+    ).setView(
+        DEFAULT_POSITION,
         13
     );
 
-
-/* ---------- Replay Tiles ---------- */
 
 L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     {
         maxZoom: 19,
-
         attribution:
             "&copy; OpenStreetMap contributors"
     }
-).addTo(
-    replayMap
-);
+).addTo(replayMap);
 
 
-/* =========================================================
-   REPLAY ROUTE
-========================================================= */
+/* ---------- Replay Full Route ---------- */
+
+replayFullRoute =
+    L.polyline(
+        [],
+        {
+            color: "#526170",
+            weight: 4,
+            opacity: 0.35,
+            dashArray: "7 9",
+            smoothFactor: 1
+        }
+    ).addTo(replayMap);
+
+
+/* ---------- Replay Active Route ---------- */
 
 replayRoute =
     L.polyline(
         [],
         {
             color: "#65a9ff",
-
             weight: 5,
-
-            opacity: 0.75,
-
+            opacity: 0.85,
             smoothFactor: 1
         }
-    ).addTo(
-        replayMap
-    );
+    ).addTo(replayMap);
 
 
-/* =========================================================
-   REPLAY MARKER
-========================================================= */
+/* ---------- Replay Marker ---------- */
 
 replayMarker =
     L.marker(
-        defaultPosition,
+        DEFAULT_POSITION,
         {
             icon: vehicleIcon
         }
-    ).addTo(
-        replayMap
-    );
+    ).addTo(replayMap);
+
+
+setTimeout(
+    () => replayMap.invalidateSize(),
+    500
+);
 
 
 /* =========================================================
    DAILY REPLAY
 ========================================================= */
 
-function updateDailyReplay(
-    data
-) {
+function updateDailyReplay(data) {
 
     const today =
         new Date();
@@ -1553,28 +1581,18 @@ function updateDailyReplay(
         24 * 60 * 60 * 1000;
 
 
-    /* =====================================================
-       FILTER TODAY'S DATA
-    ===================================================== */
-
     replayData =
-
         data
+            .filter(item => {
 
-            .filter(
-                item => {
+                const timestamp =
+                    getTimestamp(item);
 
-                    const timestamp =
-                        getTimestamp(item);
-
-                    return (
-                        timestamp >= startOfDay &&
-                        timestamp < endOfDay
-                    );
-
-                }
-            )
-
+                return (
+                    timestamp >= startOfDay &&
+                    timestamp < endOfDay
+                );
+            })
             .sort(
                 (a, b) =>
                     getTimestamp(a) -
@@ -1582,59 +1600,26 @@ function updateDailyReplay(
             );
 
 
-    /* =====================================================
-       RESET REPLAY
-    ===================================================== */
-
     stopReplay();
 
     replayIndex = 0;
 
-
-    /* =====================================================
-       STATISTICS
-    ===================================================== */
-
     updateReplayStatistics();
-
-
-    /* =====================================================
-       DRAW ROUTE
-    ===================================================== */
-
     updateReplayMap();
-
-
-    /* =====================================================
-       SLIDER
-    ===================================================== */
-
     updateReplaySlider();
 
 
-    /* =====================================================
-       MARKER
-    ===================================================== */
+    if (replayData.length) {
 
-    if (
-        replayData.length
-    ) {
+        moveReplayMarker(0);
 
-        moveReplayMarker(
-            0
-        );
-
-    }
-
-    else {
+    } else {
 
         replayMarker.setLatLng(
-            defaultPosition
+            DEFAULT_POSITION
         );
 
-        replayRoute.setLatLngs(
-            []
-        );
+        replayRoute.setLatLngs([]);
     }
 }
 
@@ -1650,7 +1635,6 @@ function updateReplayStatistics() {
             "dailyDistance"
         );
 
-
     const pointsElement =
         document.getElementById(
             "dailyPoints"
@@ -1660,18 +1644,14 @@ function updateReplayStatistics() {
     if (!replayData.length) {
 
         if (distanceElement) {
-
             distanceElement.textContent =
                 "0.00 km";
         }
 
-
         if (pointsElement) {
-
             pointsElement.textContent =
                 "0";
         }
-
 
         return;
     }
@@ -1698,16 +1678,11 @@ function updateReplayStatistics() {
 }
 
 
-/* =========================================================
-   REPLAY DISTANCE
-========================================================= */
-
 function calculateReplayDistance(
     data
 ) {
 
-    let total =
-        0;
+    let total = 0;
 
 
     for (
@@ -1717,25 +1692,11 @@ function calculateReplayDistance(
     ) {
 
         total +=
-
             calculateDistance(
-
-                Number(
-                    data[i - 1].lat
-                ),
-
-                Number(
-                    data[i - 1].lng
-                ),
-
-                Number(
-                    data[i].lat
-                ),
-
-                Number(
-                    data[i].lng
-                )
-
+                Number(data[i - 1].lat),
+                Number(data[i - 1].lng),
+                Number(data[i].lat),
+                Number(data[i].lng)
             );
     }
 
@@ -1745,42 +1706,40 @@ function calculateReplayDistance(
 
 
 /* =========================================================
-   UPDATE REPLAY MAP
+   REPLAY MAP UPDATE
 ========================================================= */
 
 function updateReplayMap() {
 
     const points =
-
         replayData.map(
             item => [
-
                 Number(item.lat),
-
                 Number(item.lng)
-
             ]
         );
 
 
-    replayRoute.setLatLngs(
+    replayFullRoute.setLatLngs(
         points
+    );
+
+    replayRoute.setLatLngs(
+        points.length
+            ? [points[0]]
+            : []
     );
 
 
     if (!points.length) {
-
         return;
     }
 
 
     replayMap.fitBounds(
-        replayRoute.getBounds(),
+        replayFullRoute.getBounds(),
         {
-            padding: [
-                30,
-                30
-            ]
+            padding: [35, 35]
         }
     );
 }
@@ -1799,21 +1758,17 @@ function updateReplaySlider() {
 
 
     if (!slider) {
-
         return;
     }
 
 
-    slider.min =
-        0;
-
+    slider.min = 0;
 
     slider.max =
         Math.max(
             replayData.length - 1,
             0
         );
-
 
     slider.value =
         replayIndex;
@@ -1824,17 +1779,14 @@ function updateReplaySlider() {
 
 
 /* =========================================================
-   MOVE REPLAY MARKER
+   REPLAY MARKER
 ========================================================= */
 
 function moveReplayMarker(
     index
 ) {
 
-    if (
-        !replayData.length
-    ) {
-
+    if (!replayData.length) {
         return;
     }
 
@@ -1849,8 +1801,7 @@ function moveReplayMarker(
         );
 
 
-    replayIndex =
-        index;
+    replayIndex = index;
 
 
     const item =
@@ -1864,57 +1815,39 @@ function moveReplayMarker(
         Number(item.lng);
 
 
-    replayMarker.setLatLng(
-        [
-            lat,
-            lng
-        ]
-    );
+    replayMarker.setLatLng([
+        lat,
+        lng
+    ]);
 
 
-    /* ---------- Show route until current point ---------- */
-
-    const traveledPoints =
-
+    const traveled =
         replayData
-
             .slice(
                 0,
                 index + 1
             )
-
             .map(
                 point => [
-
                     Number(point.lat),
-
                     Number(point.lng)
-
                 ]
             );
 
 
     replayRoute.setLatLngs(
-        traveledPoints
+        traveled
     );
 
 
-    /* ---------- Center marker ---------- */
-
     replayMap.panTo(
-        [
-            lat,
-            lng
-        ],
+        [lat, lng],
         {
             animate: true,
-
-            duration: .3
+            duration: 0.25
         }
     );
 
-
-    /* ---------- Slider ---------- */
 
     const slider =
         document.getElementById(
@@ -1923,17 +1856,12 @@ function moveReplayMarker(
 
 
     if (slider) {
-
-        slider.value =
-            index;
+        slider.value = index;
     }
 
 
     updateReplayTime();
-
-    updateJourneyInfo(
-        item
-    );
+    updateJourneyInfo(item);
 }
 
 
@@ -1948,30 +1876,23 @@ function updateReplayTime() {
             "replayCurrentTime"
         );
 
-
     const totalElement =
         document.getElementById(
             "replayTotalTime"
         );
 
 
-    if (
-        !replayData.length
-    ) {
+    if (!replayData.length) {
 
         if (currentElement) {
-
             currentElement.textContent =
                 "00:00:00";
         }
 
-
         if (totalElement) {
-
             totalElement.textContent =
                 "00:00:00";
         }
-
 
         return;
     }
@@ -1982,14 +1903,10 @@ function updateReplayTime() {
             replayData[0]
         );
 
-
     const currentTimestamp =
         getTimestamp(
-            replayData[
-                replayIndex
-            ]
+            replayData[replayIndex]
         );
-
 
     const lastTimestamp =
         getTimestamp(
@@ -2026,10 +1943,6 @@ function updateReplayTime() {
 }
 
 
-/* =========================================================
-   FORMAT DURATION
-========================================================= */
-
 function formatDuration(
     milliseconds
 ) {
@@ -2045,34 +1958,25 @@ function formatDuration(
             totalSeconds / 3600
         );
 
-
     const minutes =
         Math.floor(
             (totalSeconds % 3600) / 60
         );
-
 
     const seconds =
         totalSeconds % 60;
 
 
     return [
-
-        String(hours)
-            .padStart(2, "0"),
-
-        String(minutes)
-            .padStart(2, "0"),
-
-        String(seconds)
-            .padStart(2, "0")
-
+        String(hours).padStart(2, "0"),
+        String(minutes).padStart(2, "0"),
+        String(seconds).padStart(2, "0")
     ].join(":");
 }
 
 
 /* =========================================================
-   JOURNEY INFORMATION
+   JOURNEY INFO
 ========================================================= */
 
 function updateJourneyInfo(
@@ -2083,7 +1987,6 @@ function updateJourneyInfo(
         document.getElementById(
             "journeyStart"
         );
-
 
     const currentElement =
         document.getElementById(
@@ -2119,28 +2022,20 @@ function updateJourneyInfo(
 
 
 /* =========================================================
-   PLAY REPLAY
+   REPLAY ENGINE
 ========================================================= */
 
 function playReplay() {
 
-    if (
-        replayPlaying
-    ) {
-
+    if (replayPlaying) {
         return;
     }
 
 
-    if (
-        replayData.length < 2
-    ) {
-
+    if (replayData.length < 2) {
         return;
     }
 
-
-    /* If replay reached end, start again */
 
     if (
         replayIndex >=
@@ -2155,27 +2050,17 @@ function playReplay() {
     }
 
 
-    replayPlaying =
-        true;
-
+    replayPlaying = true;
 
     updatePlayButton();
 
-
-    runReplayStep();
+    startReplaySegment();
 }
 
 
-/* =========================================================
-   REPLAY STEP
-========================================================= */
+function startReplaySegment() {
 
-function runReplayStep() {
-
-    if (
-        !replayPlaying
-    ) {
-
+    if (!replayPlaying) {
         return;
     }
 
@@ -2191,12 +2076,54 @@ function runReplayStep() {
     }
 
 
-    replayIndex++;
+    const current =
+        replayData[
+            replayIndex
+        ];
+
+    const next =
+        replayData[
+            replayIndex + 1
+        ];
 
 
-    moveReplayMarker(
-        replayIndex
-    );
+    replaySegmentFrom = [
+        Number(current.lat),
+        Number(current.lng)
+    ];
+
+    replaySegmentTo = [
+        Number(next.lat),
+        Number(next.lng)
+    ];
+
+
+    replaySegmentStart =
+        performance.now();
+
+
+    if (replayAnimationFrame) {
+
+        cancelAnimationFrame(
+            replayAnimationFrame
+        );
+    }
+
+
+    replayAnimationFrame =
+        requestAnimationFrame(
+            animateReplaySegment
+        );
+}
+
+
+function animateReplaySegment(
+    now
+) {
+
+    if (!replayPlaying) {
+        return;
+    }
 
 
     const speedSelect =
@@ -2205,40 +2132,126 @@ function runReplayStep() {
         );
 
 
-    const delay =
+    const duration =
         speedSelect
-            ? Number(
-                speedSelect.value
-            )
+            ? Number(speedSelect.value)
             : 250;
 
 
-    replayTimer =
-        setTimeout(
-            runReplayStep,
-            delay
+    const progress =
+        Math.min(
+            (
+                now -
+                replaySegmentStart
+            ) / duration,
+            1
         );
+
+
+    const eased =
+        easeInOutCubic(progress);
+
+
+    const lat =
+        replaySegmentFrom[0] +
+        (
+            replaySegmentTo[0] -
+            replaySegmentFrom[0]
+        ) * eased;
+
+
+    const lng =
+        replaySegmentFrom[1] +
+        (
+            replaySegmentTo[1] -
+            replaySegmentFrom[1]
+        ) * eased;
+
+
+    replayMarker.setLatLng([
+        lat,
+        lng
+    ]);
+
+
+    const traveled =
+        replayData
+            .slice(
+                0,
+                replayIndex + 1
+            )
+            .map(
+                point => [
+                    Number(point.lat),
+                    Number(point.lng)
+                ]
+            );
+
+
+    traveled.push([
+        lat,
+        lng
+    ]);
+
+
+    replayRoute.setLatLngs(
+        traveled
+    );
+
+
+    if (progress < 1) {
+
+        replayAnimationFrame =
+            requestAnimationFrame(
+                animateReplaySegment
+            );
+
+        return;
+    }
+
+
+    replayIndex++;
+
+    updateReplaySlider();
+
+    updateJourneyInfo(
+        replayData[
+            replayIndex
+        ]
+    );
+
+
+    if (
+        replayIndex >=
+        replayData.length - 1
+    ) {
+
+        moveReplayMarker(
+            replayIndex
+        );
+
+        stopReplay();
+
+        return;
+    }
+
+
+    startReplaySegment();
 }
 
 
-/* =========================================================
-   STOP REPLAY
-========================================================= */
-
 function stopReplay() {
 
-    replayPlaying =
-        false;
+    replayPlaying = false;
 
 
-    if (replayTimer) {
+    if (replayAnimationFrame) {
 
-        clearTimeout(
-            replayTimer
+        cancelAnimationFrame(
+            replayAnimationFrame
         );
 
-        replayTimer =
-            null;
+        replayAnimationFrame = null;
     }
 
 
@@ -2247,7 +2260,7 @@ function stopReplay() {
 
 
 /* =========================================================
-   PLAY BUTTON UI
+   PLAY BUTTON
 ========================================================= */
 
 function updatePlayButton() {
@@ -2259,7 +2272,6 @@ function updatePlayButton() {
 
 
     if (!button) {
-
         return;
     }
 
@@ -2268,7 +2280,6 @@ function updatePlayButton() {
         button.querySelector(
             ".control-icon"
         );
-
 
     const label =
         button.querySelector(
@@ -2279,31 +2290,23 @@ function updatePlayButton() {
     if (replayPlaying) {
 
         if (icon) {
-
             icon.textContent =
                 "⏸";
         }
 
-
         if (label) {
-
             label.textContent =
                 "PAUSE";
         }
 
-    }
-
-    else {
+    } else {
 
         if (icon) {
-
             icon.textContent =
                 "▶";
         }
 
-
         if (label) {
-
             label.textContent =
                 "PLAY";
         }
@@ -2312,44 +2315,28 @@ function updatePlayButton() {
 
 
 /* =========================================================
-   START REPLAY
+   REPLAY NAVIGATION
 ========================================================= */
 
 function goToReplayStart() {
 
     stopReplay();
 
-
-    if (
-        !replayData.length
-    ) {
-
+    if (!replayData.length) {
         return;
     }
 
-
-    moveReplayMarker(
-        0
-    );
+    moveReplayMarker(0);
 }
 
-
-/* =========================================================
-   END REPLAY
-========================================================= */
 
 function goToReplayEnd() {
 
     stopReplay();
 
-
-    if (
-        !replayData.length
-    ) {
-
+    if (!replayData.length) {
         return;
     }
-
 
     moveReplayMarker(
         replayData.length - 1
@@ -2357,62 +2344,36 @@ function goToReplayEnd() {
 }
 
 
-/* =========================================================
-   BACK
-========================================================= */
-
 function replayBackward() {
 
     stopReplay();
 
-
-    if (
-        !replayData.length
-    ) {
-
+    if (!replayData.length) {
         return;
     }
 
-
-    const newIndex =
+    moveReplayMarker(
         Math.max(
             replayIndex - 1,
             0
-        );
-
-
-    moveReplayMarker(
-        newIndex
+        )
     );
 }
 
-
-/* =========================================================
-   FORWARD
-========================================================= */
 
 function replayForward() {
 
     stopReplay();
 
-
-    if (
-        !replayData.length
-    ) {
-
+    if (!replayData.length) {
         return;
     }
 
-
-    const newIndex =
+    moveReplayMarker(
         Math.min(
             replayIndex + 1,
             replayData.length - 1
-        );
-
-
-    moveReplayMarker(
-        newIndex
+        )
     );
 }
 
@@ -2426,7 +2387,6 @@ const replayPlayBtn =
         "replayPlayBtn"
     );
 
-
 if (replayPlayBtn) {
 
     replayPlayBtn.addEventListener(
@@ -2434,28 +2394,19 @@ if (replayPlayBtn) {
         () => {
 
             if (replayPlaying) {
-
                 stopReplay();
-
-            }
-
-            else {
-
+            } else {
                 playReplay();
             }
-
         }
     );
 }
 
 
-/* ---------- START ---------- */
-
 const replayStartBtn =
     document.getElementById(
         "replayStartBtn"
     );
-
 
 if (replayStartBtn) {
 
@@ -2466,13 +2417,10 @@ if (replayStartBtn) {
 }
 
 
-/* ---------- BACK ---------- */
-
 const replayBackBtn =
     document.getElementById(
         "replayBackBtn"
     );
-
 
 if (replayBackBtn) {
 
@@ -2483,13 +2431,10 @@ if (replayBackBtn) {
 }
 
 
-/* ---------- FORWARD ---------- */
-
 const replayForwardBtn =
     document.getElementById(
         "replayForwardBtn"
     );
-
 
 if (replayForwardBtn) {
 
@@ -2500,13 +2445,10 @@ if (replayForwardBtn) {
 }
 
 
-/* ---------- END ---------- */
-
 const replayEndBtn =
     document.getElementById(
         "replayEndBtn"
     );
-
 
 if (replayEndBtn) {
 
@@ -2518,14 +2460,13 @@ if (replayEndBtn) {
 
 
 /* =========================================================
-   REPLAY SLIDER EVENT
+   SLIDER
 ========================================================= */
 
 const replaySlider =
     document.getElementById(
         "replaySlider"
     );
-
 
 if (replaySlider) {
 
@@ -2535,17 +2476,11 @@ if (replaySlider) {
 
             stopReplay();
 
-
-            const index =
+            moveReplayMarker(
                 Number(
                     replaySlider.value
-                );
-
-
-            moveReplayMarker(
-                index
+                )
             );
-
         }
     );
 }
@@ -2560,73 +2495,202 @@ const replaySpeed =
         "replaySpeed"
     );
 
-
 if (replaySpeed) {
 
     replaySpeed.addEventListener(
         "change",
         () => {
 
-            if (
-                replayPlaying
-            ) {
+            if (replayPlaying) {
 
-                if (replayTimer) {
+                if (
+                    replayAnimationFrame
+                ) {
 
-                    clearTimeout(
-                        replayTimer
+                    cancelAnimationFrame(
+                        replayAnimationFrame
                     );
                 }
 
-                runReplayStep();
+                startReplaySegment();
             }
-
         }
     );
 }
 
 
 /* =========================================================
-   OFFLINE CHECK
+   KEYBOARD SHORTCUTS
 ========================================================= */
 
-setInterval(
+document.addEventListener(
+    "keydown",
+    event => {
 
-    () => {
+        const target =
+            event.target;
 
         if (
-            lastFirebaseUpdate === 0
+            target &&
+            (
+                target.tagName === "INPUT" ||
+                target.tagName === "SELECT" ||
+                target.tagName === "TEXTAREA"
+            )
         ) {
-
             return;
         }
 
 
-        const elapsed =
-            Date.now() -
-            lastFirebaseUpdate;
+        switch (event.key) {
+
+            case " ":
+
+                event.preventDefault();
+
+                if (replayPlaying) {
+                    stopReplay();
+                } else {
+                    playReplay();
+                }
+
+                break;
 
 
-        /* ---------- 10 Seconds ---------- */
+            case "ArrowLeft":
 
-        if (
-            elapsed > 10000
-        ) {
+                event.preventDefault();
 
-            updateConnection(
-                false,
-                "No recent GPS update"
-            );
+                replayBackward();
+
+                break;
+
+
+            case "ArrowRight":
+
+                event.preventDefault();
+
+                replayForward();
+
+                break;
+
+
+            case "Home":
+
+                event.preventDefault();
+
+                goToReplayStart();
+
+                break;
+
+
+            case "End":
+
+                event.preventDefault();
+
+                goToReplayEnd();
+
+                break;
         }
-
-    },
-
-    3000
+    }
 );
 
 
 /* =========================================================
-   START APPLICATION
+   CONNECTION MONITOR
+========================================================= */
+
+setInterval(
+    () => {
+
+        evaluateConnection();
+
+
+        if (deviceOnline) {
+
+            const age =
+                lastGPSUpdate
+                    ? Math.floor(
+                        (
+                            Date.now() -
+                            lastGPSUpdate
+                        ) / 1000
+                    )
+                    : 0;
+
+
+            const lastUpdate =
+                document.getElementById(
+                    "lastUpdate"
+                );
+
+
+            if (
+                lastUpdate &&
+                age >= 0
+            ) {
+
+                lastUpdate.textContent =
+                    age <= 1
+                        ? "Live GPS connection"
+                        : `Updated ${age}s ago`;
+            }
+        }
+
+    },
+    2000
+);
+
+
+/* =========================================================
+   UTILITY
+========================================================= */
+
+function setText(
+    id,
+    value
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+
+function setStyle(
+    id,
+    property,
+    value
+) {
+
+    const element =
+        document.getElementById(id);
+
+    if (element) {
+        element.style[property] = value;
+    }
+}
+
+
+function easeInOutCubic(
+    value
+) {
+
+    return value < 0.5
+        ? 4 * value ** 3
+        : 1 -
+          Math.pow(
+              -2 * value + 2,
+              3
+          ) / 2;
+}
+
+
+/* =========================================================
+   START
 ========================================================= */
 
 startFirebase();
